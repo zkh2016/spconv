@@ -224,7 +224,6 @@ class SparseMaxPoolTestTorch(nn.Module):
         self.net = spconv.SparseSequential(*layers, )
         self.shape = shape
 
-    def forward(self, features, coors, batch_size):
         coors = coors.int()
         x = spconv.SparseConvTensor(features, coors, self.shape, batch_size)
         return self.net(x)  # .dense()
@@ -615,7 +614,9 @@ class TestSpConv(TestCase):
     def testSpMaxPool3d(self):
         np.random.seed(485)
         devices = ["cuda:0"]
-        shapes = [[19, 18, 17]]
+        #shapes = [[19, 18, 17]]
+        shapes = [[1, 4, 4]]
+        #batchsizes = [1, 2]
         batchsizes = [1, 2]
 
         in_channels = [64]
@@ -693,11 +694,11 @@ def main(algo=spconv.ConvAlgo.Native, dtype=torch.float32):
     np.random.seed(484)
     # devices = ["cuda:0"]
     devices = ["cuda:0"]
-    shapes = [[400, 400, 15]]
+    shapes = [[10, 400, 152]]
     batchsizes = [2]
 
-    in_channels = [19]
-    out_channels = [17]
+    in_channels = [32]
+    out_channels = [32]
     ksizes = [(3, 3, 3)]
     strides = [1]
     paddings = [0]
@@ -709,7 +710,7 @@ def main(algo=spconv.ConvAlgo.Native, dtype=torch.float32):
         if all([s > 1, d > 1]):
             continue
         device = torch.device(dev)
-        num_points = [30000] * bs
+        num_points = [16000] * bs
 
         sparse_dict = generate_sparse_data(shape, num_points, IC)
 
@@ -719,8 +720,10 @@ def main(algo=spconv.ConvAlgo.Native, dtype=torch.float32):
             sparse_dict["indices"][:, [3, 0, 1, 2]]).astype(np.int32)
         features_dense = sparse_dict["features_dense"].astype(np.float32)
         indices_t = torch.from_numpy(indices)
-        filters = np.random.uniform(0, 1, size=[k[0], 1, 1, IC,
+        print(indices_t.size)
+        filters = np.random.uniform(0, 1, size=[k[0], 3, 3, IC,
                                                 OC]).astype(np.float32)
+        print(filters.size)
         indices_t = torch.from_numpy(indices).int().to(device).to(dtype)
         features_t = torch.from_numpy(features).to(device).to(dtype)
 
@@ -731,29 +734,57 @@ def main(algo=spconv.ConvAlgo.Native, dtype=torch.float32):
         net_ref = Conv3dTestTorch(1, 3, shape, IC, OC, k, s, p,
                                   d).to(device).to(dtype)
         filters_t = torch.from_numpy(filters).to(device).to(dtype)
-        net_ref.net[0].weight[:] = filters_t.permute(4, 3, 0, 1,
-                                                     2).contiguous()
+        tmp = filters_t.permute(4, 0, 1, 2, 3).contiguous()
+        #net_ref.net[0].weight.requires_grad = False
+        net.net[0].weight.requires_grad = False
+        features_t.requires_grad_()
+        #net.net[0].weight[:] = tmp
         net.net[0].weight[:] = filters_t
-        out_ref = net_ref(features_dense_t)
-        times = []
-        for i in range(10):
-            t = time.time()
-            out = net(features_t, indices_t, bs)
-            torch.cuda.synchronize()
-            times.append(time.time() - t)
+        net.net[0].weight.requires_grad = True
+        #out_ref = net_ref(features_dense_t)
+        #print("in_features:", features_t.detach().cpu())
+        #print("in_indices:", indices_t.detach().cpu())
+        #np.savetxt("features", features_t.detach().cpu().flatten(), fmt="%.8f");
+        np.save("features", features_t.detach().cpu())
+        #np.savetxt("indices", indices_t.detach().cpu().transpose(1,0).flatten(), fmt="%d");
+        np.save("indices", indices_t.detach().cpu().transpose(1,0))
+        #np.savetxt("kernels", net.net[0].weight.detach().data.cpu().flatten(), fmt="%.8f");
+        np.save("kernels", net.net[0].weight.detach().data.cpu())
+        #times = []
+        #for i in range(10):
+        #    t = time.time()
+        #    out = net(features_t, indices_t, bs)
+        #    torch.cuda.synchronize()
+        #    times.append(time.time() - t)
+        t = time.time()
+        out = net(features_t, indices_t, bs)
+        out._features.backward(out._features.detach())
+        torch.cuda.synchronize(device)
+        print("sparse conv3d times:", time.time() - t)
+        #print("kernel size:", net.net[0].weight.data.size());
+        #print("in_features size:", features_t.size(), "indices shape:", indices_t.size());
+        #print("out feature shape:", out._features.size(), "indices shape:", out.indices.size())
+        #np.savetxt("out_feature", out._features.detach().cpu().flatten(), fmt="%.5f")
+        np.save("out_feature", out._features.detach().cpu())
+        #np.savetxt("out_indices", out.indices.detach().cpu().transpose(1,0).flatten(), fmt="%d")
+        np.save("out_indices", out.indices.detach().cpu().transpose(1,0))
+        #print("kernels:", filters_t.cpu().numpy())
         # print((net.grid == -1).float().sum(), net.grid.numel())
         # print("spconv time", time.time() - t)
-        print("spconv time", np.mean(times[2:]))
-        out = net(features_t, indices_t, bs)
-        # print(out.indices)
-        out = out.dense()
-        out_numpy = out.detach().cpu().numpy()
+        #print("feature_t.grad:", features_t.grad)
+        #np.savetxt("featuers_grad", features_t.grad.cpu().flatten(), fmt="%.5f")
+        np.save("features_grad", features_t.grad.cpu())
+        #np.savetxt("kernel_grad", net.net[0].weight.grad.cpu().flatten(), fmt="%.5f")
+        np.save("kernel_grad", net.net[0].weight.grad.cpu())
+        ## print(out.indices)
+        #out = out.dense()
+        #out_numpy = out.detach().cpu().numpy()
 
-        print(
-            np.linalg.norm(out.detach().cpu().numpy() -
-                           out_ref.detach().cpu().numpy()))
-        print(out_numpy.min(), out_numpy.max(), out_numpy.mean(),
-              out_numpy.sum())
+        #print(
+        #    np.linalg.norm(out.detach().cpu().numpy() -
+        #                   out_ref.detach().cpu().numpy()))
+        #print(out_numpy.min(), out_numpy.max(), out_numpy.mean(),
+        #      out_numpy.sum())
 
 
 def main_subm(algo, dtype=torch.float32):
@@ -762,14 +793,14 @@ def main_subm(algo, dtype=torch.float32):
     torch.manual_seed(50051)
     # devices = ["cuda:0"]
     devices = ["cuda:0"]
-    shapes = [[400, 400, 15]]
+    shapes = [[10, 400, 150]]
     batchsizes = [2]
 
     in_channels = [32]
-    out_channels = [64]
+    out_channels = [32]
     ksizes = [(3, 3, 3)]
     strides = [1]
-    paddings = [1]
+    paddings = [0]
     dilations = [1]
     for dev, shape, bs, IC, OC, k, s, p, d in params_grid(
             devices, shapes, batchsizes, in_channels, out_channels, ksizes,
@@ -777,7 +808,7 @@ def main_subm(algo, dtype=torch.float32):
         if all([s > 1, d > 1]):
             continue
         device = torch.device(dev)
-        num_points = [120000] * bs
+        num_points = [3] * bs
 
         sparse_dict = generate_sparse_data(shape, num_points, IC)
 
@@ -787,7 +818,7 @@ def main_subm(algo, dtype=torch.float32):
             sparse_dict["indices"][:, [3, 0, 1, 2]]).astype(np.int32)
         features_dense = sparse_dict["features_dense"].astype(np.float32)
         indices_t = torch.from_numpy(indices)
-        filters = np.random.uniform(0, 1, size=[k[0], 1, 1, IC,
+        filters = np.random.uniform(0, 1, size=[k[0], 3, 3, IC,
                                                 OC]).astype(np.float32)
         indices_t = torch.from_numpy(indices).int().to(device).to(dtype)
         features_t = torch.from_numpy(features).to(device).to(dtype)
@@ -799,34 +830,63 @@ def main_subm(algo, dtype=torch.float32):
         net_ref = Conv3dTestTorch(1, 3, shape, IC, OC, k, s, p,
                                   d).to(device).to(dtype)
         filters_t = torch.from_numpy(filters).to(device).to(dtype)
-        net_ref.net[0].weight[:] = filters_t.permute(4, 3, 0, 1,
-                                                     2).contiguous()
+        net_ref.net[0].weight.requires_grad = False
+        #tmp = filters_t.permute(4,3, 0, 1, 2).contiguous()
+        tmp = filters_t.permute(4,3, 0, 1, 2).contiguous()
+        print(tmp.size())
+        print(net_ref.net[0].weight[:].size())
+        net_ref.net[0].weight[:] =  tmp 
+        net.net[0].weight.requires_grad = False 
+        features_t.requires_grad_()
         net.net[0].weight[:] = filters_t
-        out_ref = net_ref(features_dense_t)
-        times = []
-        for i in range(20):
-            t = time.time()
-            out = net(features_t, indices_t, bs)
-            torch.cuda.synchronize()
-            times.append(time.time() - t)
+        net.net[0].weight.requires_grad = True 
+        #tmp = filters_t.permute(4, 0, 1, 2, 3).contiguous()
+        #net.net[0].weight[:] = tmp 
+        #out_ref = net_ref(features_dense_t)
+        #times = []
+        #for i in range(20):
+        #    t = time.time()
+        #    out = net(features_t, indices_t, bs)
+        #    torch.cuda.synchronize()
+        #    times.append(time.time() - t)
         # print((net.grid == -1).float().sum(), net.grid.numel())
         # print("spconv time", time.time() - t)
-        print("spconv time", np.mean(times[10:]))
+        #print("spconv time", np.mean(times[10:]))
+        t = time.time()
         out = net(features_t, indices_t, bs)
-        # print(out.indices)
-        out = out.dense()
-        out_numpy = out.detach().cpu().numpy()
-        # print(
-        #     np.linalg.norm(out.detach().cpu().numpy() -
-        #                    out_ref.detach().cpu().numpy()))
-        print(out_numpy.min(), out_numpy.max(), out_numpy.mean(),
-              out_numpy.sum())
-    return out_numpy
+        print("subm forward times:", time.time() - t)
+        out._features.backward(out._features.detach())
+        print("subm conv3d times:", time.time() - t)
+        #print("indices:", indices_t.transpose(1, 0).flatten())
+        #print("features:", features_t.flatten())
+        #print("kernel:", net.net[0].weight[:].cpu().flatten())
+        #print("out_indices:", out.indices.transpose(1,0).flatten())
+        #print("out_features:", out._features.flatten())
+        np.save("subm_indices", indices_t.cpu().transpose(1, 0))
+        np.save("subm_features", features_t.detach().cpu())
+        np.save("subm_kernel", net.net[0].weight[:].detach().cpu())
+        np.save("subm_out_indices", out.indices.cpu().transpose(1,0))
+        np.save("subm_out_features", out._features.detach().cpu())
+
+        np.save("subm_features_grad", features_t.grad.cpu())
+        np.save("subm_kernels_grad", net.net[0].weight.grad.cpu())
+
+        #print("features_grad:", features_t.grad.flatten())
+        #print("kernel_grad:", net.net[0].weight.grad.flatten())
+
+        #out = out.dense()
+        #out_numpy = out.detach().cpu().numpy()
+        ## print(
+        ##     np.linalg.norm(out.detach().cpu().numpy() -
+        ##                    out_ref.detach().cpu().numpy()))
+        #print(out_numpy.min(), out_numpy.max(), out_numpy.mean(),
+        #      out_numpy.sum())
+    #return out_numpy
 
 
 if __name__ == '__main__':
-    # main_subm(algo=spconv.ConvAlgo.SparseConvNet, dtype=torch.float32)
-    # main(algo=spconv.ConvAlgo.SparseConvNet, dtype=torch.float32)
+    main_subm(algo=spconv.ConvAlgo.Native, dtype=torch.float32)
+    #main(algo=spconv.ConvAlgo.Native, dtype=torch.float32)
     # TestCase().assertAllClose(out_my, out_ref)
     # unittest.main()
-    TestSpConv().testSpMaxPool3d()
+    #TestSpConv().testSpMaxPool3d()

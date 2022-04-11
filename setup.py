@@ -165,13 +165,13 @@ if disable_jit is not None and disable_jit == "1":
     convcu.namespace = "cumm.conv.main"
 
     cu.namespace = "cumm.gemm.main"
-    std = "c++17"
+    std = "c++14"
     if cuda_ver:
         cuda_ver_number = int(cuda_ver)
         if cuda_ver_number < 110:
             std = "c++14" 
         else:
-            std = "c++17"
+            std = "c++14"
     cus = [cu, convcu, SpconvOps(), BoxOps(), HashTable(), CompileInfo()]
     if CUMM_CPU_ONLY_BUILD:
         cus = [SpconvOps(), BoxOps(), HashTable(), CompileInfo()]

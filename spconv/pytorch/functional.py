@@ -85,6 +85,10 @@ class SparseConvFunction(Function):
         indice_pairs, indice_pair_num, features, filters = ctx.saved_tensors
         timer = ctx.timer
         try:
+            print("call backward")
+            print("features:", features)
+            print("filters:", filters)
+            print("grad_output:", grad_output)
             input_bp, filters_bp = ops.indice_conv_backward(features,
                                                             filters,
                                                             grad_output,
