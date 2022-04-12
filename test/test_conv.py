@@ -756,11 +756,18 @@ def main(algo=spconv.ConvAlgo.Native, dtype=torch.float32):
         #    out = net(features_t, indices_t, bs)
         #    torch.cuda.synchronize()
         #    times.append(time.time() - t)
+
+        ###gpu warm up##
+        out1 = net(features_t, indices_t, bs)
+        torch.cuda.synchronize(device)
+        ###gpu warm up##
+
         t = time.time()
         out = net(features_t, indices_t, bs)
         out._features.backward(out._features.detach())
         torch.cuda.synchronize(device)
         print("sparse conv3d times:", time.time() - t)
+
         #print("kernel size:", net.net[0].weight.data.size());
         #print("in_features size:", features_t.size(), "indices shape:", indices_t.size());
         #print("out feature shape:", out._features.size(), "indices shape:", out.indices.size())
@@ -808,7 +815,7 @@ def main_subm(algo, dtype=torch.float32):
         if all([s > 1, d > 1]):
             continue
         device = torch.device(dev)
-        num_points = [3] * bs
+        num_points = [16000] * bs
 
         sparse_dict = generate_sparse_data(shape, num_points, IC)
 
@@ -852,10 +859,16 @@ def main_subm(algo, dtype=torch.float32):
         # print((net.grid == -1).float().sum(), net.grid.numel())
         # print("spconv time", time.time() - t)
         #print("spconv time", np.mean(times[10:]))
+
+        ###gpu warm up###
+        out1 = net(features_t, indices_t, bs)
+        ###gpu warm up####
+
         t = time.time()
         out = net(features_t, indices_t, bs)
-        print("subm forward times:", time.time() - t)
-        out._features.backward(out._features.detach())
+        #print("subm forward times:", time.time() - t)
+        #out._features.backward(out._features.detach())
+        torch.cuda.synchronize(device)
         print("subm conv3d times:", time.time() - t)
         #print("indices:", indices_t.transpose(1, 0).flatten())
         #print("features:", features_t.flatten())
