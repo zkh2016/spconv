@@ -5,6 +5,7 @@ import numpy as np
 import time
 import torch
 
+#data product by test_conv.py
 indices = np.load("indices.npy") 
 values = np.load("features.npy") 
 kernels = np.load("kernels.npy")
